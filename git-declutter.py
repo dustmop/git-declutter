@@ -14,11 +14,18 @@ def mkdir_p(path):
   os.makedirs(path)
 
 
-def execute(path, cmd):
+def execute(path, cmd, vars=None):
   pwd = os.getcwd()
   try:
     os.chdir(path)
-    status = subprocess.call(' '.join(cmd), shell=True)
+    env = None
+    if vars:
+      env = os.environ.copy()
+      for k, v in vars.items():
+        env[k] = v
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, env=env)
+    output, err = p.communicate()
+    return output.strip()
   finally:
     os.chdir(pwd)
 
@@ -37,6 +44,33 @@ def match_glob(path, globs):
       ext = g[2:]
       return path.endswith('.' + ext)
   return False
+
+
+class MessageProvider(object):
+  def __init__(self, filename):
+    self.filename = filename
+    self.map = {}
+    self.messages = []
+    self.read()
+
+  def read(self):
+    fp = open(self.filename, 'r')
+    contents = fp.read()
+    fp.close()
+    for line in contents.split('\n'):
+      if not line:
+        continue
+      space_pos = line.find(' ')
+      comment_pos = line.find('#')
+      mtime = int(line[0:space_pos])
+      txt = line[space_pos:comment_pos]
+      #print('[%s] [%s] [%s] [%s]' % (space_pos, 
+      self.messages.append([mtime, txt])
+      self.map[mtime] = txt
+    self.messages.reverse()
+
+  def get(self, mtime):
+    return self.map[mtime]
 
 
 class Path(object):
@@ -100,22 +134,27 @@ def construct_realname_with_version(path):
     return None, None
 
 
-def copy_to_repo(src, dst, is_dry_run):
+def copy_to_repo(src, dst, message, commits, is_dry_run):
   d = datetime.datetime.fromtimestamp(src.mtime)
-  time_text = d.strftime('%a %b %d %Y %H:%M:%S')
-  time_text = time_text + time.strftime(' GMT%z (%Z)', time.gmtime())
+  time_txt = d.strftime('%a %b %d %Y %H:%M:%S')
+  time_txt = time_txt + time.strftime(' GMT%z (%Z)', time.gmtime())
+  if not message:
+    message = time_txt
   if is_dry_run:
     print('----------------------------------------')
     print('%s => %s' % (src.fullpath, dst.fullpath))
-    print('cd %s && git add %s && time [%s]' % (dst.dir, dst.name, time_text))
+    print('cd %s && git add %s && time [%s]' % (dst.dir, dst.name, time_txt))
   else:
     shutil.copy2(src.fullpath, dst.fullpath)
-    execute(dst.dir, ['git add', dst.name])
-    execute(dst.dir, ['GIT_COMMITTER_DATE="%s" git commit --date="%s" -m "%s"' %
-                      (time_text, time_text, time_text)])
+    execute(dst.dir, ['git', 'add', dst.name])
+    execute(dst.dir, ['git', 'commit', '--date="%s"' % time_txt, '-m', message],
+            {'GIT_COMMITTER_DATE': time_txt})
+    rev = execute(dst.dir, ['git', 'rev-parse', 'HEAD'])
+    commits.append([src.mtime, time_txt, rev])
 
 
-def declutter(input_dir, output_dir, glob, is_dry_run):
+def declutter(input_dir, output_dir, glob, is_dry_run, create_file,
+              message_file):
   # List input directory, and sort it (by name).
   entities = os.listdir(input_dir)
   entities.sort()
@@ -162,9 +201,19 @@ def declutter(input_dir, output_dir, glob, is_dry_run):
   if answer != 'y':
     return
   # Execute.
+  msg_provider = MessageProvider(message_file)
+  commits = []
   for t in track:
     target = Path.like(t, dir=output_dir, name=(t.realname + '.' + t.ext))
-    copy_to_repo(t, target, is_dry_run)
+    copy_to_repo(t, target, msg_provider.get(t.mtime), commits, is_dry_run)
+  commits.reverse()
+  # Show commits.
+  if create_file:
+    fout = open(create_file, 'w')
+    for mtime, time_txt, rev in commits:
+      fout.write('%s %s # %s\n' % (mtime, time_txt, rev))
+    fout.close()
+    sys.stdout.write('Wrote temp commit messages to %s\n' % create_file)
 
 
 def run():
@@ -178,13 +227,19 @@ def run():
                  help='Force even if repository exists already.')
   p.add_argument('-d', dest='is_dry_run', action='store_true',
                  help='Dry run for adding files to a repo.')
+  p.add_argument('-c', dest='create_file',
+                 help=('Create a file based upon the new repo, to be edited ' +
+                       'with commit messages.'))
+  p.add_argument('-m', dest='message_file',
+                 help='Use a file for commit messages.')
   p.add_argument('globs', type=str, nargs='+',
                  help='Globs of files to process.')
   args = p.parse_args()
   if not create_repo(args.output_dir):
     if not args.force:
       raise RuntimeError('Could not create repo')
-  declutter(args.input_dir, args.output_dir, args.globs, args.is_dry_run)
+  declutter(args.input_dir, args.output_dir, args.globs, args.is_dry_run,
+            args.create_file, args.message_file)
 
 
 if __name__ == '__main__':
