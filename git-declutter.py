@@ -100,20 +100,22 @@ def construct_realname_with_version(path):
     return None, None
 
 
-def copy_to_repo(src, dst):
+def copy_to_repo(src, dst, is_dry_run):
   d = datetime.datetime.fromtimestamp(src.mtime)
   time_text = d.strftime('%a %b %d %Y %H:%M:%S')
   time_text = time_text + time.strftime(' GMT%z (%Z)', time.gmtime())
-  #print('----------------------------------------')
-  #print('%s => %s' % (src.fullpath, dst.fullpath))
-  #print('cd %s && git add %s && time [%s]' % (dst.dir, dst.name, time_text))
-  shutil.copy2(src.fullpath, dst.fullpath)
-  execute(dst.dir, ['git add', dst.name])
-  execute(dst.dir, ['GIT_COMMITTER_DATE="%s" git commit --date="%s" -m "%s"' %
-                    (time_text, time_text, time_text)])
+  if is_dry_run:
+    print('----------------------------------------')
+    print('%s => %s' % (src.fullpath, dst.fullpath))
+    print('cd %s && git add %s && time [%s]' % (dst.dir, dst.name, time_text))
+  else:
+    shutil.copy2(src.fullpath, dst.fullpath)
+    execute(dst.dir, ['git add', dst.name])
+    execute(dst.dir, ['GIT_COMMITTER_DATE="%s" git commit --date="%s" -m "%s"' %
+                      (time_text, time_text, time_text)])
 
 
-def declutter(input_dir, output_dir, glob):
+def declutter(input_dir, output_dir, glob, is_dry_run):
   # List input directory, and sort it (by name).
   entities = os.listdir(input_dir)
   entities.sort()
@@ -162,7 +164,7 @@ def declutter(input_dir, output_dir, glob):
   # Execute.
   for t in track:
     target = Path.like(t, dir=output_dir, name=(t.realname + '.' + t.ext))
-    copy_to_repo(t, target)
+    copy_to_repo(t, target, is_dry_run)
 
 
 def run():
@@ -174,24 +176,15 @@ def run():
                  help='Output git repository to create.', required=True)
   p.add_argument('-f', dest='force', action='store_true',
                  help='Force even if repository exists already.')
+  p.add_argument('-d', dest='is_dry_run', action='store_true',
+                 help='Dry run for adding files to a repo.')
   p.add_argument('globs', type=str, nargs='+',
                  help='Globs of files to process.')
   args = p.parse_args()
-  # Make sure output_dir doesn' exist yet. Create it.
-  # step 1:
-  # list intput_dir + glob
-  # sort it
-  # for each, match the glob
-  #   add to file-set
-  #   split off version
-  #   make sure versions are in order
-  # display changes (file-set, each change)
-  # show untracked files
-  # add to git
   if not create_repo(args.output_dir):
     if not args.force:
       raise RuntimeError('Could not create repo')
-  declutter(args.input_dir, args.output_dir, args.globs)
+  declutter(args.input_dir, args.output_dir, args.globs, args.is_dry_run)
 
 
 if __name__ == '__main__':
