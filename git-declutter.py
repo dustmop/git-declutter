@@ -1,4 +1,4 @@
-# usage: git-declutter files repo *.mse-set
+# usage: git-declutter -i files -o repo *.png
 
 import argparse
 import datetime
@@ -46,6 +46,17 @@ def match_glob(path, globs):
   return False
 
 
+def construct_realname_with_version(path):
+  basename = path.basename
+  match = re.match(r'^(.*)\.(\d+)$', basename)
+  if match:
+    realname = match.group(1)
+    version = int(match.group(2))
+    return realname, version
+  else:
+    return None, None
+
+
 class MessageProvider(object):
   def __init__(self, filename):
     self.filename = filename
@@ -66,7 +77,6 @@ class MessageProvider(object):
       comment_pos = line.find('#')
       mtime = int(line[0:space_pos])
       txt = line[space_pos:comment_pos]
-      #print('[%s] [%s] [%s] [%s]' % (space_pos, 
       self.messages.append([mtime, txt])
       self.map[mtime] = txt
     self.messages.reverse()
@@ -123,17 +133,6 @@ class Path(object):
     if not self.version is None:
       items.append('version=%s' % self.version)
     return '#<Path %s>' % (' '.join(items))
-
-
-def construct_realname_with_version(path):
-  basename = path.basename
-  match = re.match(r'^(.*)\.(\d+)$', basename)
-  if match:
-    realname = match.group(1)
-    version = int(match.group(2))
-    return realname, version
-  else:
-    return None, None
 
 
 def copy_to_repo(src, dst, message, commits, is_dry_run):
