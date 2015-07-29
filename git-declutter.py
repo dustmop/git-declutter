@@ -4,6 +4,7 @@ import argparse
 import datetime
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -101,13 +102,15 @@ def construct_realname_with_version(path):
 
 def copy_to_repo(src, dst):
   d = datetime.datetime.fromtimestamp(src.mtime)
-  #                 Sun Jul 12 2015 21:01:27 GMT-0400 (EDT)
   time_text = d.strftime('%a %b %d %Y %H:%M:%S')
   time_text = time_text + time.strftime(' GMT%z (%Z)', time.gmtime())
-  print('----------------------------------------')
-  print('%s => %s' % (src.fullpath, dst.fullpath))
-  print('cd %s && git add %s && time [%s]' % (dst.dir, dst.name, time_text))
-  #shutil.copy2(src.fullpath, dst.fullpath)
+  #print('----------------------------------------')
+  #print('%s => %s' % (src.fullpath, dst.fullpath))
+  #print('cd %s && git add %s && time [%s]' % (dst.dir, dst.name, time_text))
+  shutil.copy2(src.fullpath, dst.fullpath)
+  execute(dst.dir, ['git add', dst.name])
+  execute(dst.dir, ['GIT_COMMITTER_DATE="%s" git commit --date="%s" -m "%s"' %
+                    (time_text, time_text, time_text)])
 
 
 def declutter(input_dir, output_dir, glob):
