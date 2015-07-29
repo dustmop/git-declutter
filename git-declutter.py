@@ -54,6 +54,8 @@ class MessageProvider(object):
     self.read()
 
   def read(self):
+    if not self.filename:
+      return
     fp = open(self.filename, 'r')
     contents = fp.read()
     fp.close()
@@ -70,7 +72,7 @@ class MessageProvider(object):
     self.messages.reverse()
 
   def get(self, mtime):
-    return self.map[mtime]
+    return self.map.get(mtime)
 
 
 class Path(object):
