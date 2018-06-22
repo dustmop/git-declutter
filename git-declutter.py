@@ -1,12 +1,10 @@
-# usage: git-declutter -i files -o repo *.png
-
 import argparse
 import datetime
+import hashlib
 import os
 import re
 import shutil
 import subprocess
-import sys
 import time
 
 
@@ -38,14 +36,6 @@ def create_repo(path):
   return True
 
 
-def match_glob(path, globs):
-  for g in globs:
-    if g.startswith('*.'):
-      ext = g[2:]
-      return path.endswith('.' + ext)
-  return False
-
-
 def construct_realname_with_version(path):
   basename = path.basename
   match = re.match(r'^(.*)\.(\d+)$', basename)
@@ -55,84 +45,6 @@ def construct_realname_with_version(path):
     return realname, version
   else:
     return None, None
-
-
-class MessageProvider(object):
-  def __init__(self, filename):
-    self.filename = filename
-    self.map = {}
-    self.messages = []
-    self.read()
-
-  def read(self):
-    if not self.filename:
-      return
-    fp = open(self.filename, 'r')
-    contents = fp.read()
-    fp.close()
-    for line in contents.split('\n'):
-      if not line:
-        continue
-      space_pos = line.find(' ')
-      comment_pos = line.find('#')
-      mtime = int(line[0:space_pos])
-      txt = line[space_pos:comment_pos]
-      self.messages.append([mtime, txt])
-      self.map[mtime] = txt
-    self.messages.reverse()
-
-  def get(self, mtime):
-    return self.map.get(mtime)
-
-
-class Path(object):
-  def __init__(self, dir, name):
-    self.dir = dir
-    self.name = name
-    self.realname = None
-    self.version = None
-    self.init()
-
-  def init(self):
-    self.fullpath = os.path.join(self.dir, self.name)
-    self.mtime = self.mod_time(self.fullpath)
-    (basename, ext) = os.path.splitext(self.name)
-    self.basename = basename
-    self.ext = ext[1:]
-
-  def mod_time(self, path):
-    try:
-      s = os.stat(path)
-      return int(s.st_mtime)
-    except OSError:
-      return 0
-
-  @staticmethod
-  def like(other, realname=None, version=None, dir=None, name=None):
-    make = Path(other.dir, other.name)
-    if dir:
-      make.dir = dir
-    if name:
-      make.name = name
-    if realname:
-      make.realname = realname
-    if version:
-      make.version = version
-    make.init()
-    return make
-
-  def __str__(self):
-    items = []
-    items.append('dir="%s"' % self.dir)
-    items.append('basename="%s"' % self.basename)
-    items.append('ext="%s"' % self.ext)
-    if not self.mtime is None:
-      items.append('mtime=%s' % self.mtime)
-    if not self.realname is None:
-      items.append('realname="%s"' % self.realname)
-    if not self.version is None:
-      items.append('version=%s' % self.version)
-    return '#<Path %s>' % (' '.join(items))
 
 
 def copy_to_repo(src, dst, message, commits, is_dry_run):
@@ -154,93 +66,83 @@ def copy_to_repo(src, dst, message, commits, is_dry_run):
     commits.append([src.mtime, time_txt, rev])
 
 
-def declutter(input_dir, output_dir, glob, is_dry_run, create_file,
-              message_file):
-  # List input directory, and sort it (by name).
-  entities = os.listdir(input_dir)
-  entities.sort()
-  # Find files matching the glob, and sort by modification time.
-  matches = []
-  for ent in entities:
-    if match_glob(ent, glob):
-      matches.append(Path(input_dir, ent))
-  matches.sort(key=lambda p:p.mtime)
-  # Get version numbers from names, separate into tracked and untracked files.
-  track = []
-  untrack = []
-  for path in matches:
-    (realname, version) = construct_realname_with_version(path)
-    if realname:
-      track.append(Path.like(path, realname=realname, version=version))
+def build_file_list(inputs):
+  result = []
+  errors = []
+  for i in inputs:
+    if os.path.isfile(i):
+      result.append(os.path.abspath(i))
+    elif os.path.isdir(i):
+      result += [os.path.abspath(os.path.join(i, p)) for p in os.listdir(i)]
     else:
-      untrack.append(path)
-  # Check that versions are monotomically increasing.
-  collection = {}
-  for t in track:
-    if not t.realname in collection:
-      if t.version != 1:
-        raise RuntimeError('File "%s" is version %d, expected 1' %
-                           (t.realname, t.version))
-      collection[t.realname] = (t.version, t)
-    else:
-      prev = collection[t.realname][0]
-      if t.version != prev + 1:
-        raise RuntimeError('File "%s" is version %d, expected %d' %
-                           (t.realname, t.version, prev + 1))
-      collection[t.realname] = (t.version, t)
-  # Display.
-  for realname, val in collection.items():
-    (version, path) = val
-    sys.stdout.write('"%s.%s" @ %d\n' % (realname, path.ext, version))
-  if untrack:
-    sys.stdout.write('Untracked:\n')
-    for u in untrack:
-      sys.stdout.write('%s\n' % u)
-  # Prompt?
-  sys.stdout.write('Okay? [y/n]: ')
-  answer = sys.stdin.readline().strip()
-  if answer != 'y':
-    return
-  # Execute.
-  msg_provider = MessageProvider(message_file)
-  commits = []
-  for t in track:
-    target = Path.like(t, dir=output_dir, name=(t.realname + '.' + t.ext))
-    copy_to_repo(t, target, msg_provider.get(t.mtime), commits, is_dry_run)
-  commits.reverse()
-  # Show commits.
-  if create_file:
-    fout = open(create_file, 'w')
-    for mtime, time_txt, rev in commits:
-      fout.write('%s %s # %s\n' % (mtime, time_txt, rev))
-    fout.close()
-    sys.stdout.write('Wrote temp commit messages to %s\n' % create_file)
+      errors.append('Not found: "%s"' % i)
+  if len(errors):
+    raise RuntimeError(','.join(errors))
+  return result
+
+
+def get_file_metadata(file_list):
+  result = []
+  for f in file_list:
+    basename = os.path.basename(f)
+    dir = os.path.dirname(f)
+    stat = os.stat(f)
+    m = hashlib.sha256()
+    m.update(open(f, 'rb').read())
+    hash = m.hexdigest()[:12]
+    dt = datetime.datetime.fromtimestamp(int(stat.st_mtime))
+    result.append({'dir': dir, 'basename': basename, 'path': f, 'hash': hash,
+                   'modified': dt.strftime('%Y-%m-%d %H:%M:%S'),
+                   'mtime': int(stat.st_mtime), 'ctime': int(stat.st_ctime)})
+  result.sort(key=lambda x:x['mtime'])
+  return result
+
+
+_g_count = 0
+def new_id():
+  global _g_count
+  id = _g_count
+  _g_count += 1
+  return id
+
+
+def analyze_and_create_mapping_file(inputs, output_dir):
+  lock_file = os.path.abspath(os.path.join(output_dir, '.gitdeclutter.map'))
+  file_list = build_file_list(inputs)
+  metadata = get_file_metadata(file_list)
+  print('ACTION ID FILENAME                            SHA256        TIMESTAMP')
+  print('-' * 78)
+  for m in metadata:
+    action = 'create'
+    id = new_id()
+    basename = m['basename']
+    if len(basename) < 34:
+      basename += ' ' * (34 - len(basename))
+    print('%s %s  %s  %s  %s' % (action, id, basename,
+                                 m['hash'], m['modified']))
+
+
+def main_dispatch(inputs, output_dir, mapping_file, is_bare):
+  if mapping_file is None:
+    if os.path.exists(output_dir):
+      raise RuntimeError('Output directory already exists: %s' % output_dir)
+    analyze_and_create_mapping_file(inputs, output_dir)
+  else:
+    raise NotImplementedError()
 
 
 def run():
-  p = argparse.ArgumentParser(description='Turn a directory of poorly-named ' +
-                              'files into a nice, organized git repository.')
-  p.add_argument('-i', dest='input_dir',
-                 help='Input directory of poorly-named files.', required=True)
+  p = argparse.ArgumentParser(description='Turn your mess of copied files into '
+                              'a tidy git repository.')
   p.add_argument('-o', dest='output_dir',
                  help='Output git repository to create.', required=True)
-  p.add_argument('-f', dest='force', action='store_true',
-                 help='Force even if repository exists already.')
-  p.add_argument('-d', dest='is_dry_run', action='store_true',
-                 help='Dry run for adding files to a repo.')
-  p.add_argument('-c', dest='create_file',
-                 help=('Create a file based upon the new repo, to be edited ' +
-                       'with commit messages.'))
-  p.add_argument('-m', dest='message_file',
-                 help='Use a file for commit messages.')
-  p.add_argument('globs', type=str, nargs='+',
-                 help='Globs of files to process.')
+  p.add_argument('-m', dest='mapping_file',
+                 help='Use a file for describing the commits.')
+  p.add_argument('--bare', dest='is_bare', action='store_true')
+  p.add_argument('inputs', type=str, nargs='+',
+                 help='Input directories or globs to process.')
   args = p.parse_args()
-  if not create_repo(args.output_dir):
-    if not args.force:
-      raise RuntimeError('Could not create repo')
-  declutter(args.input_dir, args.output_dir, args.globs, args.is_dry_run,
-            args.create_file, args.message_file)
+  main_dispatch(args.inputs, args.output_dir, args.mapping_file, args.is_bare)
 
 
 if __name__ == '__main__':
