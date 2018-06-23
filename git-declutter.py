@@ -107,7 +107,7 @@ def new_id():
 
 
 def analyze_and_create_mapping_file(inputs, output_dir):
-  lock_file = os.path.abspath(os.path.join(output_dir, '.gitdeclutter.map'))
+  lock_file = os.path.abspath(os.path.join(output_dir, '.gitdeclutter.lock'))
   file_list = build_file_list(inputs)
   metadata = get_file_metadata(file_list)
   # TODO: Try and detect create vs modify vs delete, assign ids
@@ -125,7 +125,7 @@ def analyze_and_create_mapping_file(inputs, output_dir):
   print('# Save this text below to a file, then rerun git-declutter with')
   print('# the -m flag, providing the path to that saved file.')
   print('')
-  print('Inputs: %s' % ','.join(inputs))
+  print('Inputs: %s' % ' '.join(['"%s"' % m['path'] for m in metadata]))
   print('Output: %s' % lock_file)
   print('Body:')
   print('')
