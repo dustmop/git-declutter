@@ -47,23 +47,15 @@ def construct_realname_with_version(path):
     return None, None
 
 
-def copy_to_repo(src, dst, message, commits, is_dry_run):
-  d = datetime.datetime.fromtimestamp(src.mtime)
-  time_txt = d.strftime('%a %b %d %Y %H:%M:%S')
-  time_txt = time_txt + time.strftime(' GMT%z (%Z)', time.gmtime())
+def copy_to_repo(src, dst, dt, message):
+  time_text = dt.strftime('%a %b %d %Y %H:%M:%S')
   if not message:
-    message = time_txt
-  if is_dry_run:
-    print('----------------------------------------')
-    print('%s => %s' % (src.fullpath, dst.fullpath))
-    print('cd %s && git add %s && time [%s]' % (dst.dir, dst.name, time_txt))
-  else:
-    shutil.copy2(src.fullpath, dst.fullpath)
-    execute(dst.dir, ['git', 'add', dst.name])
-    execute(dst.dir, ['git', 'commit', '--date="%s"' % time_txt, '-m', message],
-            {'GIT_COMMITTER_DATE': time_txt})
-    rev = execute(dst.dir, ['git', 'rev-parse', 'HEAD'])
-    commits.append([src.mtime, time_txt, rev])
+    message = time_text
+  shutil.copy2(src, dst)
+  dir = os.path.dirname(dst)
+  execute(dir, ['git', 'add', os.path.basename(dst)])
+  execute(dir, ['git', 'commit', '--date="%s"' % time_text, '-m', message],
+          {'GIT_COMMITTER_DATE': time_text})
 
 
 def build_file_list(inputs):
@@ -176,30 +168,39 @@ def analyze_and_create_mapping_file(inputs, output_dir):
                                      m['hash'], m['modified'], commit_msg))
 
 
-def convert_to_map(meta_list):
+def convert_to_file_map(meta_list):
   map = {}
   for item in meta_list:
-    print(item)
     map[item['hash']] = item
   return map
 
 
-def apply_mapping_create_repo(mapping_info, inputs, output_dir):
+is_dry_run = False
+
+
+def apply_mapping_create_repo(mapping_data, inputs, repo_dir):
+  global is_dry_run
   # TODO: Can read the file list from the mapping file instead.
   file_list = build_file_list(inputs)
   metadata = get_file_metadata(file_list)
   # Convert metadata into metadata_map.
-  metadata_map = convert_to_map(metadata)
-  # Create git repo.
-  if not create_repo(output_dir):
-    raise RuntimeError(('Could not initialize git repository ' +
-                        'at "%s": Folder already exists') % output_dir)
+  file_map = convert_to_file_map(metadata)
+  naming = {}
   # For each action.
-  for item in mapping_info:
-    print('****************************************')
-    print(item)
-    print(metadata_map[item['hash']])
-  raise RuntimeError('stop')
+  for data in mapping_data:
+    file = file_map[data['hash']]
+    if data['action'] == 'create':
+      naming[data['id']] = os.path.basename(file['path'])
+    elif data['action'] == 'omit':
+      continue
+    basename = naming[data['id']]
+    target = os.path.join(repo_dir, basename)
+    dt = datetime.datetime.strptime(data['timestamp'], '%Y-%m-%d %H:%M:%S')
+    if is_dry_run:
+      print(file['path'], target, dt, data['commit_msg'])
+      print('')
+    else:
+      copy_to_repo(file['path'], target, dt, data['commit_msg'])
 
 
 def main_dispatch(inputs, output_dir, mapping_file, is_bare):
@@ -209,7 +210,13 @@ def main_dispatch(inputs, output_dir, mapping_file, is_bare):
     analyze_and_create_mapping_file(inputs, output_dir)
   else:
     mapping_info = parse_mapping_info(mapping_file)
-    apply_mapping_create_repo(mapping_info, inputs, os.path.abspath(output_dir))
+    repo_dir = os.path.abspath(output_dir)
+    # Create git repo.
+    if not create_repo(repo_dir):
+      raise RuntimeError(('Could not initialize git repository ' +
+                          'at "%s": Folder already exists') % repo_dir)
+    apply_mapping_create_repo(mapping_info, inputs, repo_dir)
+    print('Successfully created repository at "%s"' % repo_dir)
 
 
 def run():
@@ -220,9 +227,13 @@ def run():
   p.add_argument('-m', dest='mapping_file',
                  help='Use a file for describing the commits.')
   p.add_argument('--bare', dest='is_bare', action='store_true')
+  p.add_argument('--dry_run', dest='is_dry_run', action='store_true')
   p.add_argument('inputs', type=str, nargs='*',
                  help='Input directories or globs to process.')
   args = p.parse_args()
+  if args.is_dry_run:
+    global is_dry_run
+    is_dry_run = True
   main_dispatch(args.inputs, args.output_dir, args.mapping_file, args.is_bare)
 
 
