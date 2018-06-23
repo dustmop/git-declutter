@@ -102,7 +102,6 @@ def parse_mapping_info(mapping_file):
   fp = open(mapping_file, 'r')
   content = fp.read()
   fp.close()
-  #COLUMNS = [
   action_started = False
   mapping_info = []
   for line in content.split('\n'):
@@ -112,8 +111,10 @@ def parse_mapping_info(mapping_file):
       action_started = True
       continue
     if action_started:
-      action, id, filename, sha256, timestamp, commit_msg = extract_fields(line)
-      mapping_info.append([action, id, filename, sha256, timestamp, commit_msg])
+      action, id, filename, hash, timestamp, commit_msg = extract_fields(line)
+      mapping_info.append({'action': action, 'id': id, 'filename': filename,
+                           'hash': hash, 'timestamp': timestamp,
+                           'commit_msg': commit_msg})
   return mapping_info
 
 
@@ -122,10 +123,10 @@ def extract_fields(text):
   action     = text[COLUMNS[0]: COLUMNS[1]].strip()
   id         = text[COLUMNS[1]: COLUMNS[2]].strip()
   filename   = text[COLUMNS[2]: COLUMNS[3]].strip()
-  sha256     = text[COLUMNS[3]: COLUMNS[4]].strip()
+  hash       = text[COLUMNS[3]: COLUMNS[4]].strip()
   timestamp  = text[COLUMNS[4]: COLUMNS[5]].strip()
   commit_msg = text[COLUMNS[5]:].strip()
-  return action, id, filename, sha256, timestamp, commit_msg
+  return action, id, filename, hash, timestamp, commit_msg
 
 
 _g_count = 0
@@ -175,6 +176,32 @@ def analyze_and_create_mapping_file(inputs, output_dir):
                                      m['hash'], m['modified'], commit_msg))
 
 
+def convert_to_map(meta_list):
+  map = {}
+  for item in meta_list:
+    print(item)
+    map[item['hash']] = item
+  return map
+
+
+def apply_mapping_create_repo(mapping_info, inputs, output_dir):
+  # TODO: Can read the file list from the mapping file instead.
+  file_list = build_file_list(inputs)
+  metadata = get_file_metadata(file_list)
+  # Convert metadata into metadata_map.
+  metadata_map = convert_to_map(metadata)
+  # Create git repo.
+  if not create_repo(output_dir):
+    raise RuntimeError(('Could not initialize git repository ' +
+                        'at "%s": Folder already exists') % output_dir)
+  # For each action.
+  for item in mapping_info:
+    print('****************************************')
+    print(item)
+    print(metadata_map[item['hash']])
+  raise RuntimeError('stop')
+
+
 def main_dispatch(inputs, output_dir, mapping_file, is_bare):
   if mapping_file is None:
     if os.path.exists(output_dir):
@@ -182,7 +209,7 @@ def main_dispatch(inputs, output_dir, mapping_file, is_bare):
     analyze_and_create_mapping_file(inputs, output_dir)
   else:
     mapping_info = parse_mapping_info(mapping_file)
-    raise RuntimeError('stop')
+    apply_mapping_create_repo(mapping_info, inputs, os.path.abspath(output_dir))
 
 
 def run():
@@ -193,7 +220,7 @@ def run():
   p.add_argument('-m', dest='mapping_file',
                  help='Use a file for describing the commits.')
   p.add_argument('--bare', dest='is_bare', action='store_true')
-  p.add_argument('inputs', type=str, nargs='+',
+  p.add_argument('inputs', type=str, nargs='*',
                  help='Input directories or globs to process.')
   args = p.parse_args()
   main_dispatch(args.inputs, args.output_dir, args.mapping_file, args.is_bare)
