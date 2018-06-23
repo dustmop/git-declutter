@@ -36,17 +36,6 @@ def create_repo(path):
   return True
 
 
-def construct_realname_with_version(path):
-  basename = path.basename
-  match = re.match(r'^(.*)\.(\d+)$', basename)
-  if match:
-    realname = match.group(1)
-    version = int(match.group(2))
-    return realname, version
-  else:
-    return None, None
-
-
 def copy_to_repo(src, dst, dt, message):
   time_text = dt.strftime('%a %b %d %Y %H:%M:%S')
   if not message:
@@ -178,7 +167,7 @@ def convert_to_file_map(meta_list):
 is_dry_run = False
 
 
-def apply_mapping_create_repo(mapping_data, inputs, repo_dir):
+def apply_mapping_create_repo(mapping_data, inputs, repo_dir, folder):
   global is_dry_run
   # TODO: Can read the file list from the mapping file instead.
   file_list = build_file_list(inputs)
@@ -186,6 +175,10 @@ def apply_mapping_create_repo(mapping_data, inputs, repo_dir):
   # Convert metadata into metadata_map.
   file_map = convert_to_file_map(metadata)
   naming = {}
+  # If folder option is used, reset the repository directory.
+  if folder:
+    repo_dir = os.path.join(repo_dir, folder)
+    mkdir_p(repo_dir)
   # For each action.
   for data in mapping_data:
     file = file_map[data['hash']]
@@ -203,7 +196,7 @@ def apply_mapping_create_repo(mapping_data, inputs, repo_dir):
       copy_to_repo(file['path'], target, dt, data['commit_msg'])
 
 
-def main_dispatch(inputs, output_dir, mapping_file, is_bare):
+def main_dispatch(inputs, output_dir, mapping_file, folder, is_bare):
   if mapping_file is None:
     if os.path.exists(output_dir):
       raise RuntimeError('Output directory already exists: %s' % output_dir)
@@ -215,7 +208,7 @@ def main_dispatch(inputs, output_dir, mapping_file, is_bare):
     if not create_repo(repo_dir):
       raise RuntimeError(('Could not initialize git repository ' +
                           'at "%s": Folder already exists') % repo_dir)
-    apply_mapping_create_repo(mapping_info, inputs, repo_dir)
+    apply_mapping_create_repo(mapping_info, inputs, repo_dir, folder)
     print('Successfully created repository at "%s"' % repo_dir)
 
 
@@ -226,6 +219,8 @@ def run():
                  help='Output git repository to create.', required=True)
   p.add_argument('-m', dest='mapping_file',
                  help='Use a file for describing the commits.')
+  p.add_argument('-f', dest='folder',
+                 help='Folder within repo being built to add files to.')
   p.add_argument('--bare', dest='is_bare', action='store_true')
   p.add_argument('--dry_run', dest='is_dry_run', action='store_true')
   p.add_argument('inputs', type=str, nargs='*',
@@ -234,7 +229,8 @@ def run():
   if args.is_dry_run:
     global is_dry_run
     is_dry_run = True
-  main_dispatch(args.inputs, args.output_dir, args.mapping_file, args.is_bare)
+  main_dispatch(args.inputs, args.output_dir, args.mapping_file, args.folder,
+                args.is_bare)
 
 
 if __name__ == '__main__':
