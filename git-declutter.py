@@ -98,6 +98,36 @@ def get_file_metadata(file_list):
   return result
 
 
+def parse_mapping_info(mapping_file):
+  fp = open(mapping_file, 'r')
+  content = fp.read()
+  fp.close()
+  #COLUMNS = [
+  action_started = False
+  mapping_info = []
+  for line in content.split('\n'):
+    if not line:
+      continue
+    if line == ('-' * 78):
+      action_started = True
+      continue
+    if action_started:
+      action, id, filename, sha256, timestamp, commit_msg = extract_fields(line)
+      mapping_info.append([action, id, filename, sha256, timestamp, commit_msg])
+  return mapping_info
+
+
+def extract_fields(text):
+  COLUMNS = [0, 7, 10, 34, 44, 65]
+  action     = text[COLUMNS[0]: COLUMNS[1]].strip()
+  id         = text[COLUMNS[1]: COLUMNS[2]].strip()
+  filename   = text[COLUMNS[2]: COLUMNS[3]].strip()
+  sha256     = text[COLUMNS[3]: COLUMNS[4]].strip()
+  timestamp  = text[COLUMNS[4]: COLUMNS[5]].strip()
+  commit_msg = text[COLUMNS[5]:].strip()
+  return action, id, filename, sha256, timestamp, commit_msg
+
+
 _g_count = 0
 def new_id():
   global _g_count
@@ -129,7 +159,8 @@ def analyze_and_create_mapping_file(inputs, output_dir):
   print('Output: %s' % lock_file)
   print('Body:')
   print('')
-  print('ACTION ID FILENAME                SHA256    TIMESTAMP')
+  print('ACTION ID FILENAME                SHA256    ' +
+        'TIMESTAMP            COMMIT MESSAGE')
   print('-' * 78)
   for m in metadata:
     action = 'create'
@@ -150,7 +181,8 @@ def main_dispatch(inputs, output_dir, mapping_file, is_bare):
       raise RuntimeError('Output directory already exists: %s' % output_dir)
     analyze_and_create_mapping_file(inputs, output_dir)
   else:
-    raise NotImplementedError()
+    mapping_info = parse_mapping_info(mapping_file)
+    raise RuntimeError('stop')
 
 
 def run():
