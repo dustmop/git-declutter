@@ -89,7 +89,7 @@ def get_file_metadata(file_list):
     stat = os.stat(f)
     m = hashlib.sha256()
     m.update(open(f, 'rb').read())
-    hash = m.hexdigest()[:12]
+    hash = m.hexdigest()[:8]
     dt = datetime.datetime.fromtimestamp(int(stat.st_mtime))
     result.append({'dir': dir, 'basename': basename, 'path': f, 'hash': hash,
                    'modified': dt.strftime('%Y-%m-%d %H:%M:%S'),
@@ -111,10 +111,6 @@ def analyze_and_create_mapping_file(inputs, output_dir):
   file_list = build_file_list(inputs)
   metadata = get_file_metadata(file_list)
   # TODO: Try and detect create vs modify vs delete, assign ids
-  print('Inputs: %s' % ','.join(inputs))
-  print('Output: %s' % lock_file)
-  print('Body:')
-  print('')
   print('# Instructions: The actions below are listed by the order in which')
   print('# they occured. git-declutter tries its best to detect when a file')
   print('# was saved with a different file name (TODO: This isn\'t happening')
@@ -123,18 +119,29 @@ def analyze_and_create_mapping_file(inputs, output_dir):
   print('# the action `modify` if a file is being modified, and change the')
   print('# id to match the id of the previously created or modified file.')
   print('# These actions will be used to build the new git repository.')
+  print('# Also, enter the commit messages that will be used for each commit.')
   print('# Do not change any other fields.')
+  print('#')
+  print('# Save this text below to a file, then rerun git-declutter with')
+  print('# the -m flag, providing the path to that saved file.')
   print('')
-  print('ACTION ID FILENAME                            SHA256        TIMESTAMP')
+  print('Inputs: %s' % ','.join(inputs))
+  print('Output: %s' % lock_file)
+  print('Body:')
+  print('')
+  print('ACTION ID FILENAME                SHA256    TIMESTAMP')
   print('-' * 78)
   for m in metadata:
     action = 'create'
     id = new_id()
     basename = m['basename']
-    if len(basename) < 34:
-      basename += ' ' * (34 - len(basename))
-    print('%s %s  %s  %s  %s' % (action, id, basename,
-                                 m['hash'], m['modified']))
+    if len(basename) < 22:
+      basename += ' ' * (22 - len(basename))
+    elif len(basename) > 22:
+      basename = basename[:14] + '...' + basename[-5:]
+    commit_msg = 'Create new file'
+    print('%s %s  %s  %s  %s  %s' % (action, id, basename,
+                                     m['hash'], m['modified'], commit_msg))
 
 
 def main_dispatch(inputs, output_dir, mapping_file, is_bare):
