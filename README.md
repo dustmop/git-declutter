@@ -4,23 +4,23 @@
 
 Let's say you have a directory that's a mess of copies of a file.
 
-[]
+![Finder window full of copies](https://raw.githubusercontent.com/dustmop/git-declutter/master/assets/01_finder.jpg)
 
 Really though, what you'd like is a nice, neat directory with only the latest version, and any other copies stored away in the history of a tidy git repo. You can accomplish this by running git-declutter from the command-line, passing in your messy directory (git-declutter will *never* modify your existing files!), and the destination where you'd like to create a new repo:
 
 `python git-declutter.py Docs -o new_repo`
 
-[]
+![Command-line output of git-declutter](https://raw.githubusercontent.com/dustmop/git-declutter/master/assets/02_command-line.jpg)
 
 Copy the output from git-declutter into a text file, fixing it up by specifying how you'd like your new repo to look. In this case, we want only a single file, so we start with "create 0", then all the rest of the actions will use "modify 0", to declare that they are modifying the same file (id 0).
 
-[]
+![Text file containing mapping](https://raw.githubusercontent.com/dustmop/git-declutter/master/assets/03_changes-map.jpg)
 
 Finally, run git-declutter again, passing it this saved map file:
 
 `python git-declutter -m changes.map`
 
-[]
+![History in the new git repo](https://raw.githubusercontent.com/dustmop/git-declutter/master/assets/04_git-repo.png)
 
 How nice!
 
