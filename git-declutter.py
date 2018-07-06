@@ -47,6 +47,18 @@ def copy_to_repo(src, dst, dt, message):
           {'GIT_COMMITTER_DATE': time_text})
 
 
+def tokenize_quoted_strings(text):
+  elems = []
+  while True:
+    start = text.find('"')
+    if start == -1:
+      break
+    finish = text.find('"', start+1)
+    elems.append(text[start+1:finish])
+    text = text[finish+1:]
+  return elems
+
+
 def build_file_list(inputs):
   result = []
   errors = []
@@ -83,20 +95,28 @@ def parse_mapping_info(mapping_file):
   fp = open(mapping_file, 'r')
   content = fp.read()
   fp.close()
+  mapping_rows = []
   action_started = False
-  mapping_info = []
+  inputs = None
+  output_dir = None
   for line in content.split('\n'):
     if not line:
       continue
-    if line == ('-' * 78):
-      action_started = True
+    if not action_started:
+      if line.startswith('Inputs:'):
+        inputs = tokenize_quoted_strings(line[len('Inputs:')+1:])
+      elif line.startswith('Output:'):
+        output_dir = os.path.dirname(line[len('Output:')+1:])
+      elif line == ('-' * 78):
+        action_started = True
       continue
     if action_started:
       action, id, filename, hash, timestamp, commit_msg = extract_fields(line)
-      mapping_info.append({'action': action, 'id': id, 'filename': filename,
+      mapping_rows.append({'action': action, 'id': id, 'filename': filename,
                            'hash': hash, 'timestamp': timestamp,
                            'commit_msg': commit_msg})
-  return mapping_info
+  return {'inputs': inputs, 'output_dir': output_dir,
+          'mapping_rows': mapping_rows}
 
 
 def extract_fields(text):
@@ -123,6 +143,7 @@ def analyze_and_create_mapping_file(inputs, output_dir):
   file_list = build_file_list(inputs)
   metadata = get_file_metadata(file_list)
   # TODO: Try and detect create vs modify vs delete, assign ids
+  print('#')
   print('# Instructions: The actions below are listed by the order in which')
   print('# they occured. git-declutter tries its best to detect when a file')
   print('# was saved with a different file name (TODO: This isn\'t happening')
@@ -167,7 +188,7 @@ def convert_to_file_map(meta_list):
 is_dry_run = False
 
 
-def apply_mapping_create_repo(mapping_data, inputs, repo_dir, folder):
+def apply_mapping_create_repo(mapping_rows, inputs, repo_dir, folder):
   global is_dry_run
   # TODO: Can read the file list from the mapping file instead.
   file_list = build_file_list(inputs)
@@ -180,20 +201,26 @@ def apply_mapping_create_repo(mapping_data, inputs, repo_dir, folder):
     repo_dir = os.path.join(repo_dir, folder)
     mkdir_p(repo_dir)
   # For each action.
-  for data in mapping_data:
-    file = file_map[data['hash']]
-    if data['action'] == 'create':
-      naming[data['id']] = os.path.basename(file['path'])
-    elif data['action'] == 'omit':
+  for row in mapping_rows:
+    file = file_map[row['hash']]
+    if row['action'] == 'create':
+      naming[row['id']] = os.path.basename(file['path'])
+    elif row['action'] == 'modify':
+      # TODO: Assert that `id` has already been created.
+      pass
+    elif row['action'] == 'omit':
       continue
-    basename = naming[data['id']]
+    else:
+      raise RuntimeError('Unknown action: "%s"' % row['action'])
+    basename = naming[row['id']]
     target = os.path.join(repo_dir, basename)
-    dt = datetime.datetime.strptime(data['timestamp'], '%Y-%m-%d %H:%M:%S')
+    dt = datetime.datetime.strptime(row['timestamp'], '%Y-%m-%d %H:%M:%S')
     if is_dry_run:
-      print(file['path'], target, dt, data['commit_msg'])
+      print(file['path'], target, dt, row['commit_msg'])
       print('')
     else:
-      copy_to_repo(file['path'], target, dt, data['commit_msg'])
+      # TODO: Only do this once all rows were processed (action might `raise`).
+      copy_to_repo(file['path'], target, dt, row['commit_msg'])
 
 
 def main_dispatch(inputs, output_dir, mapping_file, folder, is_bare):
@@ -203,12 +230,15 @@ def main_dispatch(inputs, output_dir, mapping_file, folder, is_bare):
     analyze_and_create_mapping_file(inputs, output_dir)
   else:
     mapping_info = parse_mapping_info(mapping_file)
+    inputs = mapping_info['inputs']
+    output_dir = mapping_info['output_dir']
+    mapping_rows = mapping_info['mapping_rows']
     repo_dir = os.path.abspath(output_dir)
     # Create git repo.
-    if not create_repo(repo_dir):
+    if not is_dry_run and not create_repo(repo_dir):
       raise RuntimeError(('Could not initialize git repository ' +
                           'at "%s": Folder already exists') % repo_dir)
-    apply_mapping_create_repo(mapping_info, inputs, repo_dir, folder)
+    apply_mapping_create_repo(mapping_rows, inputs, repo_dir, folder)
     print('Successfully created repository at "%s"' % repo_dir)
 
 
@@ -216,7 +246,7 @@ def run():
   p = argparse.ArgumentParser(description='Turn your mess of copied files into '
                               'a tidy git repository.')
   p.add_argument('-o', dest='output_dir',
-                 help='Output git repository to create.', required=True)
+                 help='Output git repository to create.')
   p.add_argument('-m', dest='mapping_file',
                  help='Use a file for describing the commits.')
   p.add_argument('-f', dest='folder',
@@ -226,6 +256,7 @@ def run():
   p.add_argument('inputs', type=str, nargs='*',
                  help='Input directories or globs to process.')
   args = p.parse_args()
+  # TODO: Have to either have `-m`, or `-o` with `inputs`
   if args.is_dry_run:
     global is_dry_run
     is_dry_run = True
