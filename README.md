@@ -12,7 +12,7 @@ Really though, what you'd like is a nice, neat directory with only the latest ve
 
 ![Command-line output of git-declutter](https://raw.githubusercontent.com/dustmop/git-declutter/master/assets/02_command-line.jpg)
 
-Copy the output from git-declutter into a text file, fixing it up by specifying how you'd like your new repo to look. In this case, we want only a single file, so we start with "create 0", then all the rest of the actions will use "modify 0", to declare that they are modifying the same file (id 0).
+Copy the output from git-declutter into a text file, fixing it up by specifying how you'd like your new repo to look. In this case, we want only a single file, so we start with "create 0", then all the rest of the actions will use "modify 0", to declare that they are modifying the same file (id 0). Make sure to keep the columns aligned (up until the commit message).
 
 ![Text file containing mapping](https://raw.githubusercontent.com/dustmop/git-declutter/master/assets/03_changes-map.jpg)
 
